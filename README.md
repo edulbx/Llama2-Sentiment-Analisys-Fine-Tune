@@ -389,14 +389,3 @@ device.reset()
 ```
 
 # That's all for today folks
-
-
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-```
-
-
-```python
-!jupyter nbconvert --to markdown Generative_IA_LLM_Llama_two.ipynb
-```
