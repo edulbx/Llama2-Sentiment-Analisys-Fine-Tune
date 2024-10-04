@@ -3,7 +3,7 @@
 ## <font color='White'>Generative IA for LLM - Llama-2-7b-chat-hf</font>
 ## <font color='White'>Fine-Tuning with QLoRA for sentiment analisys</font>
 
-https://github.com/edulbx/Llama2-Sentiment-Analisys-Fine-Tune/blob/main/fine%20tuned%20gif.gif
+![InShot_20240820_224138456](https://github.com/edulbx/Llama2-Sentiment-Analisys-Fine-Tune/blob/main/fine%20tuned%20gif.gif)
 
 ## Quick disclaimer:
 #### Dont use this without a GPU for at least 12 GB, wich you can get for free on Colab, set this configuration:
