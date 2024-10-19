@@ -9,42 +9,25 @@
 #### Dont use this without a GPU for at least 12 GB, wich you can get for free on Colab, set this configuration:
 ![image](https://github.com/user-attachments/assets/34df9479-7b48-446d-b5cf-1cfe529ac88a)
 
-## Needed packages and versions
+
+### 1. Project for making an Sentiment Analisys
 
 
+#### 1.1 Installs 
 ```python
-!pip install -q -U watermark
+
+# some conflicts are soloved just by letting pip deal with some dependencies.
+# The way to do that is calling pip just one time with all the packs needed.
+!pip install -q accelerate==0.21.0 peft==0.4.0 bitsandbytes==0.40.2 transformers==4.31.0 trl==0.4.7 gradio==3.37.0 protobuf==3.20.3 scipy==1.11.1 sentencepiece==0.1.99 tokenizers==0.13.3 datasets==2.16.1
 ```
 
-
+#### 1.2 Imports
 ```python
-!pip install -q accelerate==0.21.0 peft==0.4.0 bitsandbytes==0.40.2 transformers==4.31.0
-```
 
-
-```python
-!pip install -q trl==0.4.7 gradio==3.37.0 protobuf==3.20.3 scipy==1.11.1
-```
-
-
-```python
-!pip install -q sentencepiece==0.1.99 tokenizers==0.13.3 datasets==2.16.1
-```
-
-
-```python
-%reload_ext watermark
-%watermark -a "Fine Tunig Llama2"
-```
-
-
-```python
-# Imports
-import os
-import torch
-import datasets
 import pandas as pd
-from datasets import load_dataset
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from transformers import (AutoModelForCausalLM,
                           AutoTokenizer,
                           BitsAndBytesConfig,
@@ -56,240 +39,248 @@ from peft import LoraConfig, PeftModel
 from trl import SFTTrainer
 import warnings
 warnings.filterwarnings('ignore')
+import torch
+import os
+import torch
+import datasets
+from datasets import load_dataset
 ```
 
+### 2. We start by making some configurations
 
+
+####  2.1 logging level to Critical and verifying GPU
 ```python
-# Define the log level for CRITICAL
+
+# defining logging level to Critical
 logging.set_verbosity(logging.CRITICAL)
-```
-
-
-```python
-# Shows your GPU Model
-if torch.cuda.is_available():
-    print('Num of GPUs', torch.cuda.device_count())
+# verifing GPU
+if torch.cuda.is_available(): #this func pratically writes itself on colab, is just for verifying the GPU
+    print('Numbers of GPUs:', torch.cuda.device_count())
     print('GPU Model:', torch.cuda.get_device_name(0))
-    print('Total card memory [GB]:',torch.cuda.get_device_properties(0).total_memory / 1e9)
+    print('Total Memory [GB] of GPU:',torch.cuda.get_device_properties(0).total_memory / 1e9)
 ```
+
+    Numbers of GPUs: 1
+    GPU Model: Tesla T4
+    Total Memory [GB] of GPU: 15.835660288
+
+
+#### 2.2 Reset of Vram - GPU
+```python
+
+#Reset of Vram - GPU - here's a link for you know more about ram and Vram - https://www.techtarget.com/searchstorage/definition/video-RAM#:~:text=In%20simplest%20terms%2C%20VRAM%20is,to%20processing%20graphics%2Drelated%20tasks.
+#from numba import cuda
+#device = cuda.get_current_device()
+#device.reset()
+```
+
+###3. Now we load the data
 
 
 ```python
-# GPU memory Reset
-from numba import cuda
-device = cuda.get_current_device()
-device.reset()
-```
+# Define o nome do dataset
+dataset = "dataset.csv"
+# Load the dataset with the fun load_dataset, arg are type of file, name of dataset, and delimiter.
+dataset_loaded = load_dataset('csv', data_files = dataset, delimiter = ',')
 
-
-```python
-# define the dataset
-dataset_name = "dataset.csv"
-```
-
-
-```python
-# upload dataset
-dataset_loaded = load_dataset('csv', data_files = dataset_name, delimiter = ',')
-```
-
-
-```python
-# Data in dic format
 dataset_loaded
+# This function will deliver the dataset and dic format, take a look:
+## DatasetDict({                        a tuple ()
+ ##    train: Dataset({                 inside is a dictnary {}
+  ##       features: ['train'],         inside we have a list
+   ##      num_rows: 17057
+    ##})
+  ##})
+
+# it's just an approximation for you to realize what's happening with python structures.
 ```
 
 
+    Generating train split: 0 examples [00:00, ? examples/s]
+
+
+
+
+
+    DatasetDict({
+        train: Dataset({
+            features: ['train'],
+            num_rows: 17057
+        })
+    })
+
+
+
+#### 4. Now we import the model
+
+
 ```python
-# Name of the pre-trained LLM repository
-repositorio_hf = "NousResearch/Llama-2-7b-chat-hf"
+
+#we get it from the hf repo
+
+hf_repo = "NousResearch/Llama-2-7b-chat-hf"
+
+#defining the name for the new model (after fine tuning)
+model = "model_fine_tuned"
 ```
 
-
-```python
-# New model name
-model_fine_tuned = "new_model_fine_tuned"
-```
-
-## Defining the configuration arguments
+#### 5. Now we set the fine tune arguments
 
 
 ```python
-# LoRA arguments
+#Lora:
+
 lora_r = 32
 lora_alpha = 16
 lora_dropout = 0.1
-```
 
+#BitsAndBytes(Qlora) - quantization:
+#by using the quantization method
+#with the lora arguments we are making
+#the Qlora technique
 
-```python
-# bitsandbytes arguments (QLoRa)
 use_4bit = True
 bnb_4bit_compute_dtype = "float16"
-bnb_4bit_quant_type = "nf4"
+bnb_4bit_quant_type = "nf4" # specific type created by BitsandBytes
 use_nested_quant = False
-```
 
-
-```python
-# fine-tuned arguments
-output_dir = "output"
-num_train_epochs = 1
-fp16 = True
+#fine tune configuration for training:
+output_directory = "output"
+train_epochs = 1
+fp16 = True #if set to true the bf16 must be false
 bf16 = False
 per_device_train_batch_size = 4
-per_device_eval_batch_size = 4
-gradient_accumulation_steps = 1
-gradient_checkpointing = True
+per_device_evaluation_batch_size = 4
+gradient_acumulation_steps = 1
+gradient_checkpoint = True
 max_grad_norm = 0.3
-learning_rate = 2e-4
+lr = 2e-4
 weight_decay = 0.001
-optim = "paged_adamw_32bit"
-lr_scheduler_type = "cosine"
-max_steps = -1
+optimizer = "Paged_Adamw_32bit"
+lr_schedule_type = "cosine"
+max_steps = 1
 warmup_ratio = 0.03
-```
 
-
-```python
-# Grouping sequences into batches of the same length
+#grouping sequences by length:
 group_by_length = True
 save_steps = 0
 logging_steps = 400
-```
 
-
-```python
-# Accuracy of training data
+#data type for computation during the training using the Pytorch library
+#you remember that we defined the bnb_4bit_compute_dtype above as float16
+#and the torch is a ref to the Pytorch library:
 compute_dtype = getattr(torch, bnb_4bit_compute_dtype)
 ```
 
+#### 6. Now we initialize the body of the code with the functions receiving our previously defined arguments.
 
-```python
-# Defining quantization arguments
-bnb_config = BitsAndBytesConfig(load_in_4bit = use_4bit,
-                                bnb_4bit_quant_type = bnb_4bit_quant_type,
-                                bnb_4bit_compute_dtype = compute_dtype,
-                                bnb_4bit_use_double_quant = use_nested_quant)
-```
+
 
 
 ```python
-# Loading the pre-trained base model
-modelo = AutoModelForCausalLM.from_pretrained(repositorio_hf,
-                                              quantization_config = bnb_config,
-                                              device_map = "auto")
-```
+#BitsAndBytes func
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit = use_4bit,
+    bnb_4bit_quant_type = bnb_4bit_quant_type,
+    bnb_4bit_compute_dtype = compute_dtype,
+    bnb_4bit_use_double_quant = use_nested_quant)
 
+#loading the model and using the func above
+model = AutoModelForCausalLM.from_pretrained(
+    hf_repo,
+    quantization_config = bnb_config,
+    device_map = "auto")
 
-```python
-# We won't use the cache
-modelo.config.use_cache = False
-modelo.config.pretraining_tp = 1
-```
+#definig the we wont use cache
+model.config.use_cache = False
+model.config.pretrainig_tp = 1
 
-
-```python
-# Loading the tokenizer from the base model
-tokenizer = AutoTokenizer.from_pretrained(repositorio_hf, trust_remote_code = True)
+#loading the tokenizer
+tokenizer = AutoTokenizer.from_pretrained(hf_repo, trust_remote_code = True)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
+
+#loading the peft config
+peft_config = LoraConfig(
+    lora_alpha = lora_alpha,
+    lora_dropout = lora_dropout,
+    r = lora_r,
+    bias = "none",
+    task_type = "CAUSAL_LM")
+
+#the function for the trainig args defined above:
+training_args = TrainingArguments(
+    output_dir = output_directory,
+    num_train_epochs = train_epochs,
+    per_device_train_batch_size = per_device_train_batch_size,
+    gradient_accumulation_steps = gradient_acumulation_steps,
+    optim = optimizer,
+    save_steps = save_steps,
+    logging_steps = logging_steps,
+    learning_rate = lr,
+    weight_decay = weight_decay,
+    fp16 = fp16,
+    bf16 = bf16
+    max_grad_norm = max_grad_norm,
+    max_steps = max_steps,
+    warmup_ratio = warmup_ratio,
+    group_by_length = group_by_length,
+    lr_scheduler_type = lr_schedule_type)  #Yeah I know it's many arguments but hey are need don't get confuse,
+    #use a good text editor for coding or some good IDE and you be able to review more easly those arguments above.
+
+# now we define the arguments for the supervised fine-tunig:
+
+trainer = SFTTrainer( #we imported this package for this purpose
+    model = model,
+    train_dataset = dataset_loaded["train"], #defined in nº 3
+    peft_config = peft_config, #function above
+    dataset_info_text_field = "train" #used to identify the column in the dataset that contains the text for the model to learn from
+    max_seq_length = None,
+    tokenizer = tokenizer,
+    args = training_args
+    packing = False)
 ```
+
+#### 7. Now to finally begin the trainig and save the model
 
 
 ```python
-# Loading the LoRA configuration
-peft_config = LoraConfig(lora_alpha = lora_alpha,
-                         lora_dropout = lora_dropout,
-                         r = lora_r,
-                         bias = "none",
-                         task_type = "CAUSAL_LM")
-```
-
-
-```python
-# Setting training arguments
-training_arguments = TrainingArguments(output_dir = output_dir,
-                                       num_train_epochs = num_train_epochs,
-                                       per_device_train_batch_size = per_device_train_batch_size,
-                                       gradient_accumulation_steps = gradient_accumulation_steps,
-                                       optim = optim,
-                                       save_steps = save_steps,
-                                       logging_steps = logging_steps,
-                                       learning_rate = learning_rate,
-                                       weight_decay = weight_decay,
-                                       fp16 = fp16,
-                                       bf16 = bf16,
-                                       max_grad_norm = max_grad_norm,
-                                       max_steps = max_steps,
-                                       warmup_ratio = warmup_ratio,
-                                       group_by_length = group_by_length,
-                                       lr_scheduler_type = lr_scheduler_type)
-```
-
-
-```python
-# Defining the arguments of Supervised Fine-Tuning
-trainer = SFTTrainer(model = modelo,
-                         train_dataset = dataset_loaded['train'],
-                         peft_config = peft_config,
-                         dataset_text_field = "train",
-                         max_seq_length = None,
-                         tokenizer = tokenizer,
-                         args = training_arguments,
-                         packing = False)
-```
-
-> Model Training with Fine Tuning
-
-
-```python
+#"%%time" measure the execution time
 %%time
-trainer.train()
+trainer.train() #this will call our function and the method .train to begin the training
 ```
 
 
 ```python
-# Saving the trained model
-trainer.model.save_pretrained(model_fine_tuned)
+trainer.model.save_pretrained(model)
 ```
 
-<!-- Projeto Desenvolvido na Data Science Academy - www.datascienceacademy.com.br -->
+#### 8. Testing for deploy and creating a pipeline
 
 
 ```python
-# New input text
+#new prompt to be used
 prompt = "It's rare that a movie lives up to its hype, even rarer that the hype is transcended by the actual achievement"
 ```
 
 
 ```python
-# Sentiment Analysis Pipeline with Adjusted Model
-pipe = pipeline(task = "text-generation",
-                model = model,
-                tokenizer = tokenizer,
-                max_length = 200)
-```
+#pipeline for the Sentiment Analisys with the fine-tuned model
+pipe = pipeline(task = "text-generation", model = model, tokenizer = tokenizer, max_length = 200) #you can adjust the max_length
 
+#result
+result  = pipe(f"<s>[INST] {prompt} [INST] ")
 
-```python
-# Run the pipeline and extract the result
-result = pipe(f"<s>[INST] {prompt} [/INST]")
-```
-
-
-```python
 print(result)
-```
-
-
-```python
 print(result[0]['generated_text'])
+
+
 ```
 
 
 ```python
-# Free your memory
+#to clear the mem
 del model
 del pipe
 del trainer
@@ -297,97 +288,54 @@ import gc
 gc.collect()
 ```
 
-
-```python
-# Load the model into fp16 and merge it with the LoRA weights
-base_model = AutoModelForCausalLM.from_pretrained(repository_hf,
-                                                  low_cpu_mem_usage = True,
-                                                  return_dict = True,
-                                                  torch_dtype = torch.float16,
-                                                  device_map = "auto")
-```
+#### 9. Merging the base model with the new LoRA weigth
 
 
 ```python
-# Create the final model
-model_fine_tuned_final = PeftModel.from_pretrained(base_model, model_fine_tuned)
-```
+#first we load the base model with fp16 and merge with LORA
+base_model = AutoModelForCausalLM.from_pretrained(
+    hf_repo,
+    low_cpu_mem_usage = True,
+    return_dict = True,
+    torch_dtype = torch.float16,
+    device_map = "auto",
+)
 
+#now we creat the final model
+final_model = PeftModel.from_pretrained(base_model, model) #we passing the base model and our model
+#now we merge and unload
+final_model = final_model.merge_and_unload() #we are merging the models above
 
-```python
-# Merge and download the model
-model_fine_tuned_final = model_fine_tuned_final.merge_and_unload()
-```
-
-
-```python
-# Load the tokenizer
-tokenizer = AutoTokenizer.from_pretrained(repository_hf, trust_remote_code = True)
-tokenizer.pad_token = tokenizer_dsa.eos_token
+#we will need the tokenizer once again
+tokenizer = AutoTokenizer.from_pretrained(hf_repo, trust_remote_code = True)
+tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
+
+#we save the model
+final_model.save_pretrained("new_model")
+tokenizer.save_pretrained("new_model")
+
 ```
 
 
 ```python
-# Template saver and tokenizer
-model_fine_tuned_final.save_pretrained('new-model-llm-llama2')
-tokenizer.save_pretrained('new-model-llm-llama2')
-```
-
-
-```python
-# New input text
+#we teste again:
 prompt = "It's rare that a movie lives up to its hype, even rarer that the hype is transcended by the actual achievement"
-```
-
-
-```python
-# Create the pipeline
 pipe = pipeline(task = "text-generation",
-                model = model_fine_tuned_final,
+                model = final_model,
                 tokenizer = tokenizer,
                 max_length = 200)
-```
-
-
-```python
-# Run the pipeline and extract the result
-result = pipe(f"<s>[INST] {prompt} [/INST]")
-```
-
-
-```python
+result = pipe(f"<s>[INST] {prompt} [INST] ")
 print(result)
-```
-
-
-```python
-# Let's not just classify the feeling.
-# Let's generate positive and/or negative text from the initial evaluation (text).
 print(result[0]['generated_text'])
 ```
 
 
 ```python
-# Frees up GPU memory
+#just for cleaning the GPU mem
 from numba import cuda
 device = cuda.get_current_device()
 device.reset()
 ```
 
-
-```python
-%watermark -a "Fine Tunig Llama2"
-```
-
-
-```python
-#%watermark -v -m
-```
-
-
-```python
-#%watermark --iversions
-```
-
-# That's all for today folks
+**### And we are done, thank you**
